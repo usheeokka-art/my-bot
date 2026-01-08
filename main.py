@@ -19,7 +19,7 @@ WEBSITE_URLS = [
     "https://leakvids.com/tags/leaked/"
 ]
 
-CHECK_INTERVAL_MINUTES = 30
+CHECK_INTERVAL_MINUTES = 5
 
 # ==========================================
 #           SETUP
