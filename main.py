@@ -40,7 +40,7 @@ def save_seen_video(url):
         f.write(url + "\n")
 
 # ==========================================
-#        PARSING LOGIC
+#           SMART PARSING LOGIC
 # ==========================================
 def fetch_html(url):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -59,63 +59,92 @@ def parse_videos(url):
 
     soup = BeautifulSoup(html, 'html.parser')
     videos = []
-
-    # 1. DesiHub Parser
-    if "desihub.org" in url:
-        items = soup.find_all('li', class_='video-block') or soup.find_all('div', class_='item')
-        for item in items:
-            try:
-                link = item.find('a', href=True)
-                if not link: continue
-                vid_url = link['href']
-                if not vid_url.startswith('http'): vid_url = url.rstrip('/') + '/' + vid_url.lstrip('/')
+    
+    # SMART PARSING LOGIC:
+    # We look for links that behave like videos.
+    # We assume a video link has a thumbnail image nearby.
+    
+    # Keywords commonly found in video URLs
+    video_keywords = ['/video/', '/videos/', '/watch/', '/view/', '/post/', '/clip/', '/v/']
+    
+    # Find all links on the page
+    all_links = soup.find_all('a', href=True)
+    
+    for link in all_links:
+        try:
+            href = link['href']
+            
+            # Check if URL looks like a video page
+            is_video = any(keyword in href.lower() for keyword in video_keywords)
+            
+            # If it doesn't contain obvious keywords, check if it's a main content link
+            # (Some sites use simple slugs like /title-name)
+            if not is_video:
+                # Skip navigation/login links
+                skip_keywords = ['/login', '/register', '/category', '/tag', '/user', '/search', '/page', '#', 'javascript', 'mailto']
+                if any(skip in href.lower() for skip in skip_keywords):
+                    continue
                 
-                title = link.get('title', '') or link.img.get('alt', 'No Title')
-                img = link.find('img')
-                thumb = img['src'] if img and img.has_attr('src') else "https://picsum.photos/320/180"
+                # If it's not a skip-link, check if it has an image inside
+                if link.find('img'):
+                    is_video = True
+            
+            if is_video:
+                # Ensure URL is absolute
+                if not href.startswith('http'):
+                    # Construct base URL
+                    if url.startswith('http'):
+                        parts = url.split('/')
+                        base_url = parts[0] + '//' + parts[2]
+                        href = base_url + href
                 
-                videos.append({"title": title, "url": vid_url, "thumbnail": thumb})
-            except: pass
-
-    # 2. DesiTales2 Parser
-    elif "desitales2.com" in url:
-        items = soup.find_all('div', class_='video-item') or soup.find_all('article')
-        for item in items:
-            try:
-                link = item.find('a', href=True)
-                if not link: continue
-                vid_url = link['href']
-                if not vid_url.startswith('http'): vid_url = url.rstrip('/') + '/' + vid_url.lstrip('/')
-                
+                # Get Title
                 title = link.get('title', '')
                 if not title:
-                    h = item.find(['h2', 'h3'])
-                    if h: title = h.get_text(strip=True)
+                    # Try to get text inside the link
+                    title = link.get_text(strip=True)
+                if not title:
+                    # Try alt text of image
+                    img = link.find('img')
+                    if img:
+                        title = img.get('alt', 'No Title')
                 
-                img = item.find('img')
-                thumb = img.get('data-src') if img and img.has_attr('data-src') else (img['src'] if img else "https://picsum.photos/320/180")
-                
-                videos.append({"title": title, "url": vid_url, "thumbnail": thumb})
-            except: pass
-
-    # 3. LeakVids Parser
-    elif "leakvids.com" in url:
-        items = soup.find_all('div', class_='item') or soup.find_all('div', class_='video-thumb')
-        for item in items:
-            try:
-                link = item.find('a', href=True)
-                if not link: continue
-                vid_url = link['href']
-                if not vid_url.startswith('http'): vid_url = url.rstrip('/') + '/' + vid_url.lstrip('/')
-                
-                title = link.get('title', '') or (link.img.get('alt', '') if link.find('img') else "Video")
+                # Get Thumbnail
                 img = link.find('img')
-                thumb = img.get('data-original') if img and img.has_attr('data-original') else (img['src'] if img else "https://picsum.photos/320/180")
+                thumb = None
+                if img:
+                    thumb = img.get('data-src') or img.get('data-original') or img.get('src')
                 
-                videos.append({"title": title, "url": vid_url, "thumbnail": thumb})
-            except: pass
+                if not thumb:
+                    continue # No image = likely not a video card
+                
+                # Clean thumbnail URL
+                if not thumb.startswith('http'):
+                    if thumb.startswith('//'):
+                        thumb = 'https:' + thumb
+                    else:
+                        parts = url.split('/')
+                        base_url = parts[0] + '//' + parts[2]
+                        thumb = base_url + thumb
 
-    return videos
+                videos.append({
+                    "title": title.strip(),
+                    "url": href,
+                    "thumbnail": thumb
+                })
+                
+        except Exception as e:
+            continue
+
+    # Remove Duplicates (Simple check by URL)
+    unique_videos = []
+    seen_urls = set()
+    for v in videos:
+        if v['url'] not in seen_urls:
+            unique_videos.append(v)
+            seen_urls.add(v['url'])
+            
+    return unique_videos
 
 # ==========================================
 #           BOT HANDLERS
@@ -144,7 +173,7 @@ async def manual_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ No new videos found.")
 
 async def send_post(context, vid):
-    # Simple "Open" button only (No Skip to avoid crashes)
+    # Simple "Open" button only
     keyboard = [[InlineKeyboardButton("Open 🔗", url=vid['url'])]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -204,7 +233,7 @@ if __name__ == '__main__':
     
     # Render Webhook Setup
     port = int(os.environ.get('PORT', 8080))
-    # Render automatically sets RENDER_EXTERNAL_URL, we use it or fallback
+    # Render automatically sets RENDER_EXTERNAL_URL
     url = os.environ.get('RENDER_EXTERNAL_URL') 
     
     if not url:
@@ -215,4 +244,4 @@ if __name__ == '__main__':
         port=port,
         url_path=BOT_TOKEN,
         webhook_url=f"{url}/{BOT_TOKEN}"
-    )
+                        )
