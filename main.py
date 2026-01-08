@@ -364,4 +364,3 @@ if __name__ == '__main__':
         url_path=BOT_TOKEN,
         webhook_url=f"{url}/{BOT_TOKEN}"
     )
-    )
