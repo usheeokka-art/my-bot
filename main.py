@@ -354,13 +354,14 @@ if __name__ == '__main__':
     job_queue = application.job_queue
     job_queue.run_repeating(background_loop, interval=CHECK_INTERVAL_MINUTES * 60, first=10)
     
-    # Webhook
+        # Webhook
     port = int(os.environ.get('PORT', 8080))
-    url = os.environ.get('REPL_URL')
+    url = os.environ.get('RENDER_EXTERNAL_URL', 'https://example.com')
     
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path=BOT_TOKEN,
         webhook_url=f"{url}/{BOT_TOKEN}"
+    )
     )
